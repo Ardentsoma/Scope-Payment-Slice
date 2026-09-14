@@ -27,9 +27,6 @@ yarn-error.log*
 .env
 .env*.local
 
-# exported documentation dump (replace with real docs later)
-Documentation
-
 # typescript
 *.tsbuildinfo
 next-env.d.ts
