@@ -1,0 +1,71 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// One registered user. email is globally unique so two accounts can never
+/// share a login (also what makes signup idempotent at the DB level).
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  passwordHash String
+  fullName  String
+  emailVerifiedAt DateTime?
+  /// Tracks when the last verification code was emailed so resend is limited
+  /// to a server-side cooldown window, independent of any client countdown.
+  emailVerificationLastSentAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions               Session[]
+  emailVerificationTokens EmailVerificationToken[]
+  passwordResetTokens    PasswordResetToken[]
+}
+
+/// A server-side session row. The browser only ever holds a random id that
+/// references this row, so sessions can be revoked/expired centrally.
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+/// A 6-digit email verification code. `codeHash` is what verification is
+/// checked against (never compared in plaintext); the raw `code` is also kept
+/// so the currently issued token is inspectable directly in the database /
+/// Prisma Studio during development. Rows die once used or past expiresAt.
+model EmailVerificationToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  code      String
+  codeHash  String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+/// A password reset token. Only the sha-256 hash is stored with an expiry and
+/// a one-shot flag, so a leaked DB cannot be used to mint reset links.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
