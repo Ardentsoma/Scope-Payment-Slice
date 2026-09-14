@@ -1,10 +1,7 @@
 # Scope: Authentication Slice
-<!-- HOW TO USE THIS FILE - Fill in Sections 1–4 once your code works — they're mostly factual. - Fill in Section 5 (Concepts) right after you implement each piece, while the reasoning is fresh. Don't leave it until the end. - Fill in Section 6 (What Went Wrong) AS YOU HIT PROBLEMS, not afterward. Keep a running note somewhere while you build, then paste the real ones in here. Don't invent tidy problems at the end — reviewers can tell. - Delete all HTML comments (like this one) before submitting. -->
 
 ## What This Is
 Scope is a tool for freelance designers to manage client projects. This slice covers account creation, sign in, email verification, and password reset, ending at a placeholder dashboard.
-<!-- Paragraph 2: what is deliberately NOT included, and why. -->
-[This slice deliberately does not include ...]
 
 ## How To Run It
 ### Prerequisites
