@@ -25,6 +25,185 @@ model User {
   sessions               Session[]
   emailVerificationTokens EmailVerificationToken[]
   passwordResetTokens    PasswordResetToken[]
+  subscription           Subscription?
+  invoices               Invoice[]
+  paymentEvents          PaymentEvent[]
+  cancellationSurveys    CancellationSurvey[]
+  prorations             Proration[]
+}
+
+enum PlanTier {
+  FREE
+  PRO_YEARLY
+  PRO_MONTHLY
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  TRIALING
+}
+
+enum InvoiceStatus {
+  PAID
+  PENDING
+  FAILED
+}
+
+/// Every payment-related moment, stored as a separate, append-only row.
+/// Nothing in this table is ever updated or deleted — history is added only,
+/// so we always know what actually happened around money. It is deliberately
+/// separate from the Subscription row (which only shows the current state).
+enum PaymentEventType {
+  /// A checkout was started (Flutterwave intent created).
+  CHECKOUT_STARTED
+  /// Flutterwave (webhook or our verify call) confirmed the charge.
+  PAYMENT_CONFIRMED
+  /// The active subscription was unlocked/updated after confirmation.
+  SUBSCRIPTION_ACTIVATED
+  /// The charge was not successful / amounts mismatched / verify failed.
+  PAYMENT_FAILED
+  /// The user scheduled a cancellation (effective at their period end).
+  SUBSCRIPTION_CANCELLED
+  /// A plan change was scheduled to apply at the end of the current period.
+  PLAN_CHANGE_SCHEDULED
+  /// A scheduled plan change was applied (or the period rolled over).
+  PLAN_CHANGE_APPLIED
+}
+
+/// Optional reason a user gives for leaving. The cancellation itself is never
+/// blocked or delayed by this survey — it is recorded after the fact.
+enum CancellationReason {
+  TOO_EXPENSIVE
+  MISSING_FEATURES
+  SWITCHING_TOOL
+  NOT_USING_ENOUGH
+  OTHER
+}
+
+/// The active billing plan for a user. A user always has exactly one row;
+/// the FREE tier is created lazily on first access.
+model Subscription {
+  id                 String             @id @default(cuid())
+  userId             String             @unique
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planTier           PlanTier           @default(FREE)
+  status             SubscriptionStatus @default(ACTIVE)
+  /// Price per billing cycle for the current plan, stored as a whole number
+  /// of kobo (1 naira = 100 kobo). NEVER a float, NEVER naira.
+  amount             Int                @default(0)
+  currency           String             @default("NGN")
+  /// Credited/used against a per-cycle limit for FREE-tier quotas.
+  currentPeriodStart DateTime           @default(now())
+  currentPeriodEnd   DateTime
+  cancelAtPeriodEnd  Boolean            @default(false)
+  /// Plan to switch to once the current period ends (null = no change pending).
+  pendingPlanTier    PlanTier?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([userId])
+}
+
+/// A single billing invoice / receipt row created on subscription changes.
+/// All amounts are whole kobo. Card numbers, expiry dates and security codes
+/// are NEVER stored — only Flutterwave's transaction reference ids.
+model Invoice {
+  id            String        @id @default(cuid())
+  userId        String
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invoiceNumber String        @unique
+  planName      String
+  planTier      PlanTier      @default(FREE)
+  /// Total charged for this invoice, in whole kobo.
+  amount        Int
+  currency      String        @default("NGN")
+  status        InvoiceStatus @default(PAID)
+  paymentMethod String        @default("card")
+  billingPeriod String
+  /// Flutterwave tx_ref used to correlate the checkout + webhook with this row.
+  paymentReference String?    @unique
+  /// Flutterwave transaction id once the payment succeeds.
+  transactionId   String?
+  billingEmail    String?
+  cardholderName  String?
+  createdAt       DateTime      @default(now())
+
+  @@index([userId])
+}
+
+/// Append-only ledger of payment-related events (checkout started, payment
+/// confirmed, subscription activated, payment failed, subscription cancelled,
+/// plan changes). Rows are only ever INSERTED — never updated or deleted — and
+/// exist separately from the live Subscription status. Also used for checkout
+/// rate limiting and for duplicate-webhook detection.
+model PaymentEvent {
+  id        String            @id @default(cuid())
+  userId    String
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  eventType PaymentEventType
+  /// Flutterwave transaction reference, when the event relates to one.
+  txRef     String?
+  /// Plan id the event relates to ("free" | "pro_yearly" | "pro_monthly").
+  planId    String?
+  /// Money involved in kobo (whole numbers only).
+  amountKobo Int?
+  currency  String            @default("NGN")
+  /// Structured context: proration math, verification results, source
+  /// (webhook vs verify), errored amounts, etc. Never card details.
+  details   Json?
+  createdAt DateTime          @default(now())
+
+  @@index([userId, createdAt])
+  @@index([txRef])
+}
+
+/// Optional cancellation feedback. A user can skip this entirely and it never
+/// delays or blocks the cancellation itself.
+model CancellationSurvey {
+  id        String             @id @default(cuid())
+  userId    String
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reason    CancellationReason
+  /// Free-text "Other" answer, or extra context.
+  comment   String?
+  createdAt DateTime           @default(now())
+
+  @@index([userId])
+}
+
+/// Append-only record of a prorated upgrade calculation (Pro Monthly ->
+/// Pro Yearly). One row per tx_ref, written at checkout time, storing every
+/// number used so the math is auditable at a glance.
+model Proration {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  txRef         String   @unique
+  fromPlanId    String
+  toPlanId      String
+  /// Full price of the target plan (kobo).
+  fullPriceKobo Int
+  /// Final amount actually charged (kobo) = full price minus credit.
+  chargeKobo    Int
+  /// The billing period the proration is computed against.
+  periodStart   DateTime
+  periodEnd     DateTime
+  /// Days in the current billing cycle (from periodStart to periodEnd).
+  totalDays     Int
+  /// Whole days left in the current period at charge time.
+  daysRemaining Int
+  /// Daily rate of the current plan in kobo/day (rounded).
+  dailyRateKobo Int
+  /// Credit granted for the unused remaining days (kobo).
+  creditKobo    Int
+  /// Human-readable calc with actual numbers, e.g.
+  /// "₦99,000 − (₦400/day × 30 days) = ₦87,000".
+  formula       String
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
 }
 
 /// A server-side session row. The browser only ever holds a random id that

@@ -1,0 +1,6 @@
+{
+  "name": "Scope - Plans & Billing",
+  "description": "Choose the plan right for your workflow on Scope with client projects, AI brief conversions, and flexible billing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
