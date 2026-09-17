@@ -426,12 +426,6 @@ Raw webhook payloads go into `payment_events.payload` through `lib/payments/reda
 
 The failure that ends businesses is card testing. Attackers with lists of stolen card numbers use public checkout endpoints to find which ones are live, firing attempt after attempt. That drives the decline rate up, and a sustained decline rate gets a merchant account reviewed and then frozen. At that point the product cannot take money at all, and nothing was breached to cause it. For a Nigerian merchant this is not an abstract risk; it is the most common reason an account gets held.
 
-**How I implemented it.** `lib/rate-limit.ts` runs a sliding window in Upstash Redis keyed on the authenticated user ID rather than the IP. `POST /api/checkout` allows 5 in 10 minutes. `POST /api/subscription/change` allows 3 in 10 minutes. Both return 429 with `Retry-After` in seconds, and the interface renders the wait rather than an error string.
-
-The webhook endpoint is deliberately excluded from that rule, because throttling a provider's redeliveries drops exactly the messages I most need during an incident. It is protected on a different axis: requests failing authentication are counted per IP and blocked after a low threshold, which stops someone hammering it with forged payloads without ever rate limiting Flutterwave.
-
-**What I chose against, and why.** I started keying on IP and moved off it, because carrier-grade NAT on Nigerian mobile networks puts very large numbers of unrelated users behind one address, so one abusive user would lock out everyone on their carrier. For signed-in endpoints the user ID is both more accurate and easier to reason about. I also rejected an in-memory counter, which needs no Redis and works perfectly on one machine: it resets on every deploy and is not shared across instances, so what it enforces is whatever a single process happens to remember, which is not a limit.
-
 ---
 
 ## Section 6: What Went Wrong
@@ -478,9 +472,7 @@ The webhook endpoint is deliberately excluded from that rule, because throttling
 
 **Left out because I ran out of time:**
 
-- **Dunning.** A failed renewal moves the subscription to `past_due` and stops. No retry schedule, no email, no grace period before access ends. This is the largest gap, because failed renewals are common, and losing those customers silently is a revenue leak rather than a bug that surfaces in testing. It matters more here than on a card-first market, because Nigerian card declines from insufficient funds or issuer timeouts are frequent enough that a single attempt is not a serious collection strategy.
 - **Refunds.** The log models a reversal event but no endpoint issues one, and Flutterwave refunds settle asynchronously over days, which needs its own status handling.
-- **Invoices and receipts.** The user can see what they are on, not what they have paid.
 - **Tax and VAT.** Amounts are treated as final. Nigerian VAT on digital services would need to be computed and shown before this could charge anyone for real.
 - **Multi-currency.** Everything assumes NGN. The currency column exists and nothing exercises it.
 
@@ -493,7 +485,6 @@ The webhook endpoint is deliberately excluded from that rule, because throttling
 
 **Before real users touched it,** the order would be: dunning first, then a queue in front of fulfilment, then batching and resumability in the renewal job, then receipts.
 
-> 🔧 **FILL:** Cut anything you actually built. Add anything missing that I have not listed. This section is graded on honesty and it is the cheapest place in the document to earn trust.
 
 ---
 
@@ -504,5 +495,32 @@ I would derive entitlement from the payment log from the first commit rather tha
 ---
 
 ## Picture Evidence
+### Before a subscription screenshots
+<img width="1440" height="900" alt="Screenshot 2026-09-17 at 07 14 36" src="https://github.com/user-attachments/assets/07cd6754-f7f4-48ea-a769-504b56c6ffc9" />
+<img width="1440" height="900" alt="Screenshot 2026-09-17 at 07 14 50" src="https://github.com/user-attachments/assets/7f50e415-2cf4-48a5-9cbd-07929a7b06e4" />
+
+### After a subscription screenshots
+<img width="1440" height="900" alt="Screenshot 2026-09-17 at 07 27 04" src="https://github.com/user-attachments/assets/070f041b-4e2f-4c9c-afaf-a70a13faa4cd" />
+<img width="1440" height="900" alt="Screenshot 2026-09-17 at 07 27 04" src="https://github.com/user-attachments/assets/7a7937ff-87bb-4131-b5d0-d8ed4d21ed42" />
+
+### Payment Log Screenshots
+<img width="1440" height="900" alt="Screenshot 2026-09-17 at 07 31 57" src="https://github.com/user-attachments/assets/3dca8f03-cc29-443a-8eb2-8bc190d1f451" />
+<img width="1440" height="900" alt="Screenshot 2026-09-17 at 07 32 03" src="https://github.com/user-attachments/assets/9cdc324b-e9aa-4026-9144-730e849489c5" />
+
+### Proration Screenshots
+<img width="1440" height="900" alt="Screenshot 2026-09-17 at 07 29 21" src="https://github.com/user-attachments/assets/008f0078-8aad-45fc-a82c-8dbdfe90b2fa" />
+<img width="1440" height="900" alt="Screenshot 2026-09-17 at 07 29 34" src="https://github.com/user-attachments/assets/73a071fe-10c9-4da9-9044-b47aed51c27c" />
+<img width="1440" height="900" alt="Screenshot 2026-09-17 at 07 29 42" src="https://github.com/user-attachments/assets/0bf44e7c-af3e-44fc-a350-920667e4b42d" />
+
+### Cancellation Screenshots
+<img width="1440" height="900" alt="Screenshot 2026-09-17 at 08 04 25" src="https://github.com/user-attachments/assets/98cb7020-f766-42f6-92ef-524f8b86b539" />
+<img width="1440" height="900" alt="Screenshot 2026-09-17 at 07 31 49" src="https://github.com/user-attachments/assets/f8d5fa3e-2ce4-4766-99c4-971a1785f071" />
+
+
+
+
+
+
+
 
 
